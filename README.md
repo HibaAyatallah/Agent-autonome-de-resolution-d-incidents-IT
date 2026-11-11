@@ -142,3 +142,20 @@ Très avancé – système autonome multi-agents avec orchestration intelligente
 |---|---|
 | Membre A | Hiba Ayatallah |
 | Membre B | Manal Wassila |
+
+## 11. Dataset choisi
+
+### Systems monitoring platform for AI incident response
+
+Le dataset est disponible sur [Mendeley Data](https://data.mendeley.com/datasets/md7x42rcbm/1). Il regroupe les résultats de **311 tests** réalisés sur une plateforme de surveillance de serveurs intégrant l'intelligence artificielle pour détecter et analyser des incidents.
+
+Les données comprennent des métriques liées à l'utilisation du processeur, de la mémoire et du stockage, des journaux de services, ainsi que des informations sur les alertes et leur temps de réponse. Le dataset inclut également l'analyse des journaux effectuée par le modèle GPT utilisé dans la plateforme.
+
+### Pourquoi ce dataset ?
+
+- **Taille adaptée à un prototype :** les 311 tests sont plus faciles à explorer et à traiter qu'un très grand corpus de télémétrie.
+- **Données liées aux incidents :** les métriques et les journaux permettent d'étudier la détection et l'analyse de problèmes système.
+- **Lien avec l'architecture du projet :** ces données peuvent alimenter les agents Système et Logs, puis aider l'agent de raisonnement à établir un diagnostic.
+- **Évaluation du traitement des alertes :** les temps de réponse permettent d'étudier la rapidité de la prise en charge.
+
+Ce dataset constitue un point de départ pour le prototype. Il ne couvre pas à lui seul toutes les fonctions prévues, notamment le diagnostic réseau, l'exécution de corrections et la vérification après intervention. Ces aspects pourront être ajoutés dans un environnement de test contrôlé.

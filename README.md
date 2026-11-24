@@ -170,4 +170,6 @@ Le collecteur de la phase 3 expose `GET /api/v1/monitoring/snapshot` et peut aus
 
 Les agents Logs, Système, Réseau et Sécurité de la phase 4 analysent maintenant ces événements et mesures sous forme de rapports structurés. Ils restent indépendants ; leur coordination arrivera en phase 5.
 
-La phase 5 ajoute `POST /api/v1/incidents/diagnose` : le coordinateur distribue le contexte aux quatre agents en parallèle, conserve leur état et leur timeline, puis renvoie catégorie et priorité initiales. Il ne donne pas encore de cause racine ni de résolution.
+La phase 5 ajoute `POST /api/v1/incidents/diagnose` : le coordinateur distribue le contexte aux quatre agents en parallèle, conserve leur état et leur timeline, puis renvoie catégorie et priorité initiales.
+
+La phase 6 ajoute un raisonnement déterministe sur les rapports structurés. La réponse expose `reasoning.status`, des hypothèses reliées aux preuves des agents, un niveau de confiance motivé, les limites et les prochaines vérifications diagnostiques. Une hypothèse n'est jamais présentée comme une cause confirmée. Les alertes du dataset restent des alertes : elles ne sont pas converties en métriques brutes, journaux complets ou preuves de résolution. Cette phase ne lance aucune remédiation et n'expose aucune commande.

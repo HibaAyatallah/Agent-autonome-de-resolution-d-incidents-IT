@@ -18,6 +18,7 @@ from incident_response.orchestration.models import (
     WorkflowStatus,
 )
 from incident_response.orchestration.settings import WorkflowSettings
+from incident_response.reasoning.agent import ReasoningAgent
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ class CoordinatorAgent:
         self.system_agent = SystemAgent()
         self.network_agent = NetworkAgent()
         self.security_agent = SecurityAgent()
+        self.reasoning_agent = ReasoningAgent()
 
     def run(self, incident: IncidentInput) -> IncidentAssessment:
         state = IncidentWorkflowState(
@@ -161,6 +163,14 @@ class CoordinatorAgent:
                     )
 
         state.agent_reports = reports
+        reasoning = self.reasoning_agent.analyze(reports)
+        state.events.append(
+            WorkflowEvent(
+                event_type="reasoning_completed",
+                actor=self.reasoning_agent.agent_id,
+                message=reasoning.summary,
+            )
+        )
         state.priority = self._select_priority(reports)
         failed_agents = [name for name, report in reports.items() if report.status == AgentStatus.ERROR]
         state.status = WorkflowStatus.DEGRADED if failed_agents else WorkflowStatus.DIAGNOSED
@@ -171,7 +181,7 @@ class CoordinatorAgent:
         )
         if failed_agents:
             summary += f" Diagnostic partiel : agents indisponibles ({', '.join(failed_agents)})."
-        summary += " Aucune cause racine ni résolution n'est déclarée à cette étape."
+        summary += " Aucune cause racine n'est confirmée et aucune résolution n'est exécutée à cette étape."
         state.events.append(
             WorkflowEvent(
                 event_type="assessment_ready",
@@ -189,6 +199,7 @@ class CoordinatorAgent:
             description=incident.description,
             summary=summary,
             agent_reports=state.agent_reports,
+            reasoning=reasoning,
             events=state.events,
         )
 

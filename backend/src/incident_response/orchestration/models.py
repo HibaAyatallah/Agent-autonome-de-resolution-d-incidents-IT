@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from incident_response.agents.models import AgentReport
 from incident_response.monitoring.models import MonitoringSnapshot
+from incident_response.reasoning.models import ReasoningAssessment
 
 
 class IncidentOrigin(StrEnum):
@@ -67,4 +68,5 @@ class IncidentAssessment(BaseModel):
     description: str
     summary: str
     agent_reports: dict[str, AgentReport]
+    reasoning: ReasoningAssessment
     events: list[WorkflowEvent]

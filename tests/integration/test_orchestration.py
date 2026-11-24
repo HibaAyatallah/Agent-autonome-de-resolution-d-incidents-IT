@@ -14,6 +14,7 @@ from incident_response.orchestration.models import (
     WorkflowStatus,
 )
 from incident_response.orchestration.workflow import IncidentWorkflow
+from incident_response.reasoning.models import ConfidenceLevel, ReasoningStatus
 
 
 class OrchestrationTests(unittest.TestCase):
@@ -60,6 +61,9 @@ class OrchestrationTests(unittest.TestCase):
         self.assertEqual(assessment.agent_reports["network"].status, AgentStatus.OK)
         self.assertEqual(assessment.events[0].event_type, "incident_received")
         self.assertIn("Aucune cause racine", assessment.summary)
+        self.assertEqual(assessment.reasoning.status, ReasoningStatus.ANALYZED)
+        self.assertTrue(assessment.reasoning.hypotheses)
+        self.assertIn("reasoning_completed", [event.event_type for event in assessment.events])
 
     def test_diagnose_api_contract_and_route_handler(self) -> None:
         app = create_app()
@@ -68,6 +72,7 @@ class OrchestrationTests(unittest.TestCase):
         assessment = diagnose_incident(request)
         self.assertEqual(assessment.incident_id, request.incident_id)
         self.assertEqual(assessment.status, WorkflowStatus.DIAGNOSED)
+        self.assertEqual(assessment.reasoning.status, ReasoningStatus.INSUFFICIENT_DATA)
 
     def test_missing_diagnostics_are_reported_as_no_data(self) -> None:
         assessment = IncidentWorkflow().run(IncidentInput(description="Serveur lent"))
@@ -111,6 +116,10 @@ class OrchestrationTests(unittest.TestCase):
         self.assertEqual(assessment.agent_reports["logs"].status, AgentStatus.NO_DATA)
         self.assertEqual(assessment.agent_reports["network"].status, AgentStatus.OK)
         self.assertEqual(assessment.priority, IncidentPriority.P2)
+        hypothesis = assessment.reasoning.hypotheses[0]
+        self.assertEqual(hypothesis.hypothesis_id, "network_usage_alert")
+        self.assertEqual(hypothesis.confidence, ConfidenceLevel.LOW)
+        self.assertEqual(hypothesis.supporting_evidence[0].source, "dataset_alerts")
 
     def test_agent_exception_is_retried_then_isolated_from_other_agents(self) -> None:
         coordinator = CoordinatorAgent(max_agent_attempts=2)

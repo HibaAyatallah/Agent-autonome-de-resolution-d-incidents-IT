@@ -147,15 +147,27 @@ Très avancé – système autonome multi-agents avec orchestration intelligente
 
 ### Systems monitoring platform for AI incident response
 
-Le dataset est disponible sur [Mendeley Data](https://data.mendeley.com/datasets/md7x42rcbm/1). Il regroupe les résultats de **311 tests** réalisés sur une plateforme de surveillance de serveurs intégrant l'intelligence artificielle pour détecter et analyser des incidents.
+Source : [Mendeley Data](https://data.mendeley.com/datasets/md7x42rcbm/1). L'archive fournie contient `results.xlsx`, avec une feuille principale de **311 lignes et 6 colonnes** (`Datos finales`) et une feuille de synthèse (`Hoja 5`). La feuille principale fournit les temps d'acquittement, de traitement et d'envoi d'analyse, l'heure de création, un type (`log` ou `usage`) et un payload JSON d'alerte.
 
-Les données comprennent des métriques liées à l'utilisation du processeur, de la mémoire et du stockage, des journaux de services, ainsi que des informations sur les alertes et leur temps de réponse. Le dataset inclut également l'analyse des journaux effectuée par le modèle GPT utilisé dans la plateforme.
+L'inspection du fichier montre **303 alertes `log` et 8 alertes `usage`**. Les alertes comprennent notamment des échecs d'authentification SSH, des alertes CPU/RAM/réseau et des erreurs ou absences de données de source. Les 311 payloads ont le statut `firing`.
 
 ### Pourquoi ce dataset ?
 
-- **Taille adaptée à un prototype :** les 311 tests sont plus faciles à explorer et à traiter qu'un très grand corpus de télémétrie.
-- **Données liées aux incidents :** les métriques et les journaux permettent d'étudier la détection et l'analyse de problèmes système.
-- **Lien avec l'architecture du projet :** ces données peuvent alimenter les agents Système et Logs, puis aider l'agent de raisonnement à établir un diagnostic.
-- **Évaluation du traitement des alertes :** les temps de réponse permettent d'étudier la rapidité de la prise en charge.
+- Il fournit des alertes au format proche d'un événement de monitoring réel, que le projet peut ingérer et classer.
+- Il contient des messages et des métadonnées utiles à l'agent Logs et au triage initial par le coordinateur.
+- Ses temps de réponse permettent d'étudier les délais d'acquittement et de traitement.
+- Son volume réduit convient à la mise au point et à la démonstration du pipeline.
 
-Ce dataset constitue un point de départ pour le prototype. Il ne couvre pas à lui seul toutes les fonctions prévues, notamment le diagnostic réseau, l'exécution de corrections et la vérification après intervention. Ces aspects pourront être ajoutés dans un environnement de test contrôlé.
+**Limites constatées :** le fichier ne contient pas les mesures brutes de CPU, RAM ou disque, les journaux système complets, une série temporelle de métriques, des traces réseau détaillées, ni des actions de remédiation et leurs résultats de vérification. Les noms des champs de temps n'indiquent pas clairement leur unité dans le classeur. Le prototype traitera donc ce fichier comme un historique d'alertes, et utilisera des mesures système/réseau en direct ou des scénarios simulés pour les autres agents. Aucun résultat de remédiation ne sera déduit de ce dataset.
+
+## 12. Architecture initiale
+
+La proposition d'architecture, les choix technologiques, les limites de données et la structure créée pour le projet sont décrits dans [docs/architecture.md](docs/architecture.md). Le développement fonctionnel suivra les phases du cahier des charges, avec validation avant de commencer la phase suivante.
+
+Le module d'ingestion de la phase 2 est prêt. Après installation de l'environnement décrit dans `docs/architecture.md`, lance `python -m incident_response.dataset` pour régénérer les alertes normalisées et le rapport d'inspection dans `data/processed/`.
+
+Le collecteur de la phase 3 expose `GET /api/v1/monitoring/snapshot` et peut aussi être lancé en continu avec `python -m incident_response.monitoring --interval 5`. Configure les seuils et les cibles TCP autorisées dans `.env` (voir `.env.example`). Pour démarrer l'API : `uvicorn incident_response.main:app --app-dir backend/src --reload`.
+
+Les agents Logs, Système, Réseau et Sécurité de la phase 4 analysent maintenant ces événements et mesures sous forme de rapports structurés. Ils restent indépendants ; leur coordination arrivera en phase 5.
+
+La phase 5 ajoute `POST /api/v1/incidents/diagnose` : le coordinateur distribue le contexte aux quatre agents en parallèle, conserve leur état et leur timeline, puis renvoie catégorie et priorité initiales. Il ne donne pas encore de cause racine ni de résolution.

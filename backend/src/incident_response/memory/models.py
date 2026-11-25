@@ -24,10 +24,10 @@ class IncidentMemoryRecord(MemoryBase):
     diagnosis_summary: Mapped[str] = mapped_column(Text)
     findings: Mapped[list[dict]] = mapped_column(JSON)
     hypotheses: Mapped[list[dict]] = mapped_column(JSON)
-
-    # These outcome fields stay NULL until later phases produce verified outcomes.
-    root_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
     proposed_remediation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # Proposed plans are not outcomes; verified result fields stay NULL until later phases.
+    root_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
     executed_actions: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
     verification_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     final_status: Mapped[str | None] = mapped_column(String(32), nullable=True)

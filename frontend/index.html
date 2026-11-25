@@ -37,6 +37,10 @@
     .pager { display:flex; justify-content:center; align-items:center; gap:14px; margin-top:20px; }
     .pager button { min-width:94px; }
     .note { margin-top:22px; border-left:3px solid var(--accent); padding:10px 14px; background:#142129; color:var(--muted); font-size:13px; }
+    .plan { border-top:1px solid var(--line); margin-top:14px; padding-top:12px; }
+    .plan-action { border:1px solid var(--line); border-radius:10px; padding:12px; margin:10px 0; background:#142129; }
+    .plan-action h4 { margin:0 0 7px; }
+    .risk { color:#ffbf69; font-weight:700; }
     @media(max-width:720px) { header { align-items:flex-start; flex-direction:column; } .filters { grid-template-columns:1fr 1fr; } .filters input { grid-column:1/-1; } .detail-grid { grid-template-columns:1fr; } }
   </style>
 </head>
@@ -68,6 +72,32 @@
     if (!values?.length) { parent.append(node('p', 'Aucun élément enregistré.', 'muted')); return; }
     const ul = node('ul'); values.forEach(value => { const li = node('li'); li.append(render(value)); ul.append(li); }); parent.append(ul);
   }
+  function renderPlan(parent, plan) {
+    const section = node('section', undefined, 'plan');
+    section.append(node('h3', 'Plan de remédiation proposé'));
+    if (!plan) {
+      section.append(node('p', 'Aucun plan n’est enregistré pour ce diagnostic.', 'muted'));
+      parent.append(section); return;
+    }
+    section.append(node('p', `État : ${plan.status} · Approbation : ${plan.approval_status} · Exécution : ${plan.execution_status}`, 'muted'));
+    section.append(node('p', plan.summary));
+    (plan.actions || []).forEach(action => {
+      const card = node('div', undefined, 'plan-action');
+      card.append(node('h4', action.title));
+      card.append(node('p', `Hypothèse liée : ${action.hypothesis_id}`));
+      card.append(node('p', action.description));
+      card.append(node('p', `Lien avec les preuves : ${action.rationale}`));
+      card.append(node('p', `Paramètres autorisés : ${JSON.stringify(action.parameters)}`));
+      card.append(node('p', `Risque ${action.risk_level} · ${action.risk_explanation}`, 'risk'));
+      card.append(node('p', action.approval_required ? 'Validation humaine requise. Aucune action exécutée.' : 'Validation non requise.'));
+      addList(card, 'Preuves associées', action.evidence, item => `${item.agent_id} · ${item.finding_code} · ${item.source}.${item.field} = ${item.value ?? 'non disponible'}${item.unit ? ` ${item.unit}` : ''}`);
+      addList(card, 'Limites', action.limitations, value => value);
+      section.append(card);
+    });
+    addList(section, 'Recommandations bloquées faute de preuves suffisantes', plan.blocked_recommendations, item => `${item.hypothesis_id} : ${item.reason}`);
+    addList(section, 'Limites générales', plan.limitations, value => value);
+    parent.append(section);
+  }
   function renderIncident(item) {
     const card = node('article');
     const top = node('div', undefined, 'top');
@@ -79,11 +109,12 @@
     card.append(node('h2', item.description || 'Incident sans description'));
     card.append(node('p', item.diagnosis_summary, 'muted'));
     card.append(node('small', `${new Date(item.created_at).toLocaleString('fr-FR')} · ${item.incident_id}`, 'muted'));
-    const details = node('details'); details.append(node('summary', 'Voir constats et hypothèses'));
+    const details = node('details'); details.append(node('summary', 'Voir constats, hypothèses et plan'));
     const grid = node('div', undefined, 'detail-grid');
     addList(grid, `Constats (${item.findings?.length || 0})`, item.findings, finding => `${finding.severity} · ${finding.finding_code} · ${finding.agent_id}`);
     addList(grid, `Hypothèses (${item.hypotheses?.length || 0})`, item.hypotheses, hypothesis => `${hypothesis.hypothesis_id} · confiance ${hypothesis.confidence}`);
     details.append(grid);
+    renderPlan(details, item.proposed_remediation);
     details.append(node('p', item.final_status ? `Statut final : ${item.final_status}` : 'Statut final : non vérifié', 'muted'));
     card.append(details); return card;
   }

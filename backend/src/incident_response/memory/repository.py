@@ -14,6 +14,7 @@ from incident_response.memory.schemas import IncidentHistoryItem, IncidentHistor
 from incident_response.memory.settings import MemorySettings
 from incident_response.orchestration.models import IncidentAssessment, IncidentInput
 from incident_response.reasoning.models import SimilarIncidentReference
+from incident_response.remediation.models import ProposedRemediationPlan
 
 _IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])")
 _EMAIL = re.compile(r"(?i)\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b")
@@ -54,6 +55,16 @@ def _tokens(value: str) -> set[str]:
 def _jaccard(left: set[str], right: set[str]) -> float:
     union = left | right
     return len(left & right) / len(union) if union else 0.0
+
+
+def _sanitize_json_strings(value: Any) -> Any:
+    if isinstance(value, str):
+        return sanitize_memory_text(value)
+    if isinstance(value, list):
+        return [_sanitize_json_strings(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _sanitize_json_strings(item) for key, item in value.items()}
+    return value
 
 
 class IncidentMemoryRepository:
@@ -165,9 +176,13 @@ class IncidentMemoryRepository:
             "diagnosis_summary": sanitize_memory_text(assessment.reasoning.summary),
             "findings": self._safe_findings(assessment),
             "hypotheses": hypotheses,
-            # Deliberately not inferred from a diagnostic hypothesis.
+            "proposed_remediation": (
+                _sanitize_json_strings(assessment.remediation_plan.model_dump(mode="json"))
+                if assessment.remediation_plan is not None
+                else None
+            ),
+            # A plan is only a proposal; outcomes stay unset until verified by later phases.
             "root_cause": None,
-            "proposed_remediation": None,
             "executed_actions": None,
             "verification_result": None,
             "final_status": None,
@@ -246,11 +261,24 @@ class IncidentMemoryRepository:
                 diagnosis_summary=record.diagnosis_summary,
                 findings=record.findings or [],
                 hypotheses=record.hypotheses or [],
+                proposed_remediation=(
+                    ProposedRemediationPlan.model_validate(record.proposed_remediation)
+                    if record.proposed_remediation
+                    else None
+                ),
                 final_status=record.final_status,
             )
             for record in records
         ]
         return IncidentHistoryResponse(items=items, total=total, limit=limit, offset=offset)
+
+    def get_remediation_plan(self, incident_id: str) -> ProposedRemediationPlan | None:
+        """Return a saved proposal without mutating approval or execution state."""
+        with self._session_factory() as session:
+            record = session.get(IncidentMemoryRecord, incident_id)
+            if record is None or record.proposed_remediation is None:
+                return None
+            return ProposedRemediationPlan.model_validate(record.proposed_remediation)
 
     def find_similar(
         self,

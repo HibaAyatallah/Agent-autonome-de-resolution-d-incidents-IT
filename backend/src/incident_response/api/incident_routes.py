@@ -1,4 +1,5 @@
 from threading import Lock
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -6,6 +7,7 @@ from incident_response.memory.repository import IncidentMemoryRepository
 from incident_response.memory.schemas import IncidentHistoryResponse
 from incident_response.orchestration.models import IncidentAssessment, IncidentInput
 from incident_response.orchestration.workflow import IncidentWorkflow
+from incident_response.remediation.models import ProposedRemediationPlan
 
 router = APIRouter()
 workflow: IncidentWorkflow | None = None
@@ -24,6 +26,21 @@ def get_workflow() -> IncidentWorkflow:
 @router.post("/diagnose", response_model=IncidentAssessment, tags=["incidents"])
 def diagnose_incident(incident: IncidentInput) -> IncidentAssessment:
     return get_workflow().run(incident)
+
+
+@router.get(
+    "/{incident_id}/remediation-plan",
+    response_model=ProposedRemediationPlan,
+    tags=["incidents"],
+)
+def get_incident_remediation_plan(incident_id: UUID) -> ProposedRemediationPlan:
+    repository = get_workflow().memory_repository
+    if repository is None:
+        raise HTTPException(status_code=503, detail="Incident memory is not configured.")
+    plan = repository.get_remediation_plan(str(incident_id))
+    if plan is None:
+        raise HTTPException(status_code=404, detail="No remediation plan is stored for this incident.")
+    return plan
 
 
 @router.get("/history", response_model=IncidentHistoryResponse, tags=["incidents"])

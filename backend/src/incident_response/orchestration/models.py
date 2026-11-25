@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from incident_response.agents.models import AgentReport
 from incident_response.monitoring.models import MonitoringSnapshot
 from incident_response.reasoning.models import ReasoningAssessment
+from incident_response.remediation.models import ProposedRemediationPlan
 
 
 class IncidentOrigin(StrEnum):
@@ -69,4 +70,5 @@ class IncidentAssessment(BaseModel):
     summary: str
     agent_reports: dict[str, AgentReport]
     reasoning: ReasoningAssessment
+    remediation_plan: ProposedRemediationPlan | None = None
     events: list[WorkflowEvent]

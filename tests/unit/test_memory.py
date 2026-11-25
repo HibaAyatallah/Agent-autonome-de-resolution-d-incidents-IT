@@ -8,6 +8,7 @@ from incident_response.memory.models import IncidentMemoryRecord
 from incident_response.memory.repository import IncidentMemoryRepository
 from incident_response.orchestration.models import IncidentInput, IncidentOrigin
 from incident_response.orchestration.workflow import IncidentWorkflow
+from incident_response.remediation.models import ExecutionStatus, RemediationPlanStatus
 from sqlalchemy import select
 
 
@@ -88,7 +89,14 @@ class IncidentMemoryTests(unittest.TestCase):
                 self.assertNotIn("private-value", stored.description)
                 self.assertNotIn("secret-value", stored.description)
                 self.assertIsNone(stored.root_cause)
-                self.assertIsNone(stored.proposed_remediation)
+                self.assertEqual(
+                    stored.proposed_remediation["status"],
+                    RemediationPlanStatus.INSUFFICIENT_EVIDENCE.value,
+                )
+                self.assertEqual(
+                    stored.proposed_remediation["execution_status"],
+                    ExecutionStatus.NOT_EXECUTED.value,
+                )
                 self.assertIsNone(stored.executed_actions)
                 self.assertIsNone(stored.verification_result)
                 self.assertIsNone(stored.final_status)

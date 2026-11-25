@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from incident_response.remediation.models import ProposedRemediationPlan
+
 
 class IncidentHistoryItem(BaseModel):
     incident_id: str
@@ -12,6 +14,7 @@ class IncidentHistoryItem(BaseModel):
     diagnosis_summary: str
     findings: list[dict] = Field(default_factory=list)
     hypotheses: list[dict] = Field(default_factory=list)
+    proposed_remediation: ProposedRemediationPlan | None = None
     final_status: str | None = None
 
 

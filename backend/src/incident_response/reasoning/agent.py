@@ -9,6 +9,7 @@ from incident_response.reasoning.models import (
     ReasoningAssessment,
     ReasoningEvidence,
     ReasoningStatus,
+    SimilarIncidentReference,
 )
 
 _HYPOTHESIS_DETAILS = {
@@ -76,11 +77,16 @@ class ReasoningAgent:
 
     agent_id = "reasoning"
 
-    def analyze(self, reports: dict[str, AgentReport]) -> ReasoningAssessment:
+    def analyze(
+        self,
+        reports: dict[str, AgentReport],
+        similar_incidents: list[SimilarIncidentReference] | None = None,
+    ) -> ReasoningAssessment:
         grouped: dict[str, list[ReasoningEvidence]] = defaultdict(list)
         counter: dict[str, list[ReasoningEvidence]] = defaultdict(list)
         limitations: dict[str, list[str]] = defaultdict(list)
         data_gaps = self._data_gaps(reports)
+        similar = similar_incidents or []
 
         for report_name, report in sorted(reports.items()):
             if report.status != AgentStatus.OK:
@@ -125,9 +131,10 @@ class ReasoningAgent:
                 summary += " Les données manquantes limitent l'analyse."
             return ReasoningAssessment(
                 status=ReasoningStatus.INSUFFICIENT_DATA,
-                summary=summary,
+                summary=self._append_memory_context(summary, len(similar)),
                 data_gaps=data_gaps
                 or ["Aucun constat pertinent n'a été produit par les rapports spécialisés."],
+                similar_incidents=similar,
             )
 
         summary = (
@@ -136,10 +143,20 @@ class ReasoningAgent:
         )
         return ReasoningAssessment(
             status=ReasoningStatus.ANALYZED,
-            summary=summary,
+            summary=self._append_memory_context(summary, len(similar)),
             hypotheses=hypotheses,
             data_gaps=data_gaps,
+            similar_incidents=similar,
         )
+
+    @staticmethod
+    def _append_memory_context(summary: str, similar_count: int) -> str:
+        if similar_count:
+            summary += (
+                f" {similar_count} dossier(s) historique(s) similaire(s) sont fournis comme contexte ; "
+                "ils ne confirment pas la cause de l'incident actuel."
+            )
+        return summary
 
     @staticmethod
     def _hypothesis_for(

@@ -5,6 +5,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.db
+*.sqlite
+*.sqlite3
 *.egg-info/
 data/raw/*
 !data/raw/.gitkeep

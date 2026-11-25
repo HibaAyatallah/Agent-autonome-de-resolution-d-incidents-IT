@@ -24,6 +24,7 @@ dev = [
   "pytest>=8.0,<10.0",
   "ruff>=0.6,<1.0",
 ]
+postgres = ["psycopg[binary]>=3.2,<4.0"]
 
 [tool.setuptools]
 package-dir = {"" = "backend/src"}

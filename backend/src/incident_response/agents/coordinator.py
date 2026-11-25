@@ -19,6 +19,7 @@ from incident_response.orchestration.models import (
 )
 from incident_response.orchestration.settings import WorkflowSettings
 from incident_response.reasoning.agent import ReasoningAgent
+from incident_response.reasoning.models import SimilarIncidentReference
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,11 @@ class CoordinatorAgent:
         self.security_agent = SecurityAgent()
         self.reasoning_agent = ReasoningAgent()
 
-    def run(self, incident: IncidentInput) -> IncidentAssessment:
+    def run(
+        self,
+        incident: IncidentInput,
+        similar_incidents: list[SimilarIncidentReference] | None = None,
+    ) -> IncidentAssessment:
         state = IncidentWorkflowState(
             incident=incident,
             events=[
@@ -69,7 +74,7 @@ class CoordinatorAgent:
             ],
         )
         state.status = WorkflowStatus.DIAGNOSING
-        state.categories = self._classify_categories(incident)
+        state.categories = self.classify_categories(incident)
         state.events.append(
             WorkflowEvent(
                 event_type="triage_completed",
@@ -163,7 +168,7 @@ class CoordinatorAgent:
                     )
 
         state.agent_reports = reports
-        reasoning = self.reasoning_agent.analyze(reports)
+        reasoning = self.reasoning_agent.analyze(reports, similar_incidents)
         state.events.append(
             WorkflowEvent(
                 event_type="reasoning_completed",
@@ -227,7 +232,7 @@ class CoordinatorAgent:
         raise RuntimeError("Agent retry loop exited unexpectedly.")
 
     @staticmethod
-    def _classify_categories(incident: IncidentInput) -> list[str]:
+    def classify_categories(incident: IncidentInput) -> list[str]:
         categories: set[str] = set()
         text = incident.description.casefold()
         alert_names = {str(record.get("alert_name", "")) for record in incident.alert_records}

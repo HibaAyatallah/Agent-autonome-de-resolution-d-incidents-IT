@@ -69,7 +69,8 @@ class OrchestrationTests(unittest.TestCase):
         app = create_app()
         self.assertIn("/api/v1/incidents/diagnose", app.openapi()["paths"])
         request = IncidentInput(description="Incident utilisateur")
-        assessment = diagnose_incident(request)
+        with patch("incident_response.api.incident_routes.workflow", IncidentWorkflow()):
+            assessment = diagnose_incident(request)
         self.assertEqual(assessment.incident_id, request.incident_id)
         self.assertEqual(assessment.status, WorkflowStatus.DIAGNOSED)
         self.assertEqual(assessment.reasoning.status, ReasoningStatus.INSUFFICIENT_DATA)

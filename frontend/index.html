@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101820">
+  <title>Historique des incidents · AIOps</title>
+  <style>
+    :root { color-scheme: dark; --bg:#101820; --panel:#182630; --line:#2b3d48; --muted:#a7b7c0; --text:#f2f6f7; --accent:#66dfc2; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(ellipse at 85% 0,#183b3a 0,transparent 35%),var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif; }
+    main { max-width:1120px; margin:auto; padding:40px 22px 60px; }
+    header { display:flex; justify-content:space-between; gap:24px; align-items:flex-end; margin-bottom:26px; }
+    .eyebrow { color:var(--accent); font-size:12px; font-weight:700; letter-spacing:.13em; text-transform:uppercase; }
+    h1 { margin:6px 0; font-size:clamp(28px,5vw,42px); letter-spacing:-.04em; }
+    .muted { color:var(--muted); }
+    .count { border:1px solid var(--line); border-radius:14px; padding:12px 16px; min-width:135px; background:#142129; }
+    .count strong { display:block; font-size:24px; color:var(--accent); }
+    .filters { display:grid; grid-template-columns:minmax(200px,1fr) 170px 180px auto; gap:10px; padding:14px; background:var(--panel); border:1px solid var(--line); border-radius:16px; margin-bottom:16px; }
+    input,select,button { background:#101b22; color:var(--text); border:1px solid var(--line); border-radius:9px; padding:11px 12px; font:inherit; }
+    button { cursor:pointer; background:var(--accent); border-color:var(--accent); color:#09211e; font-weight:700; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    #message { min-height:26px; color:var(--muted); }
+    .list { display:grid; gap:12px; }
+    article { background:linear-gradient(145deg,#1b2b35,#16232c); border:1px solid var(--line); border-radius:14px; padding:18px; }
+    .top { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; align-items:center; }
+    .badges { display:flex; flex-wrap:wrap; gap:7px; }
+    .badge { border:1px solid #3c515c; border-radius:999px; padding:3px 9px; color:#c8d6dc; font-size:12px; }
+    .priority { font-weight:800; }
+    .priority.P1 { color:#ff8b87; } .priority.P2 { color:#ffbf69; } .priority.P3 { color:var(--accent); }
+    article h2 { font-size:17px; margin:13px 0 5px; }
+    article p { margin:5px 0; }
+    details { border-top:1px solid var(--line); margin-top:13px; padding-top:11px; }
+    summary { color:var(--accent); cursor:pointer; }
+    .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:12px; }
+    ul { padding-left:20px; margin:6px 0; } li { margin:3px 0; }
+    .pager { display:flex; justify-content:center; align-items:center; gap:14px; margin-top:20px; }
+    .pager button { min-width:94px; }
+    .note { margin-top:22px; border-left:3px solid var(--accent); padding:10px 14px; background:#142129; color:var(--muted); font-size:13px; }
+    @media(max-width:720px) { header { align-items:flex-start; flex-direction:column; } .filters { grid-template-columns:1fr 1fr; } .filters input { grid-column:1/-1; } .detail-grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div><div class="eyebrow">AI incident response · mémoire</div><h1>Historique des incidents</h1><div class="muted">Consultez les diagnostics enregistrés et leurs éléments de preuve.</div></div>
+    <div class="count"><strong id="total">—</strong><span class="muted">diagnostic(s)</span></div>
+  </header>
+  <form class="filters" id="filters">
+    <input id="q" type="search" maxlength="200" placeholder="Rechercher dans les incidents…" aria-label="Rechercher">
+    <select id="priority" aria-label="Filtrer par priorité"><option value="">Toutes priorités</option><option>P1</option><option>P2</option><option>P3</option><option>P4</option><option value="UNASSESSED">Non évaluée</option></select>
+    <select id="category" aria-label="Filtrer par catégorie"><option value="">Toutes catégories</option><option value="logs">Logs</option><option value="system">Système</option><option value="network">Réseau</option><option value="security">Sécurité</option><option value="general">Général</option></select>
+    <button type="submit">Filtrer</button>
+  </form>
+  <div id="message" role="status"></div>
+  <section class="list" id="list" aria-live="polite"></section>
+  <nav class="pager" aria-label="Pagination"><button id="previous">Précédent</button><span class="muted" id="page"></span><button id="next">Suivant</button></nav>
+  <aside class="note">Les cas similaires et les hypothèses sont des aides au diagnostic. Une résolution n’est confirmée qu’après une vérification réelle ; les alertes du dataset ne prouvent pas qu’une intervention a réussi.</aside>
+</main>
+<script>
+  const pageSize = 20;
+  let offset = 0;
+  const list = document.querySelector('#list');
+  const message = document.querySelector('#message');
+  function node(tag, text, className) { const el = document.createElement(tag); if (text !== undefined) el.textContent = text; if (className) el.className = className; return el; }
+  function addList(parent, title, values, render) {
+    parent.append(node('h3', title));
+    if (!values?.length) { parent.append(node('p', 'Aucun élément enregistré.', 'muted')); return; }
+    const ul = node('ul'); values.forEach(value => { const li = node('li'); li.append(render(value)); ul.append(li); }); parent.append(ul);
+  }
+  function renderIncident(item) {
+    const card = node('article');
+    const top = node('div', undefined, 'top');
+    const badges = node('div', undefined, 'badges');
+    badges.append(node('span', item.origin, 'badge'), node('span', item.workflow_status, 'badge'));
+    (item.categories || []).forEach(category => badges.append(node('span', category, 'badge')));
+    const priority = node('span', item.priority, `priority ${item.priority}`);
+    top.append(badges, priority); card.append(top);
+    card.append(node('h2', item.description || 'Incident sans description'));
+    card.append(node('p', item.diagnosis_summary, 'muted'));
+    card.append(node('small', `${new Date(item.created_at).toLocaleString('fr-FR')} · ${item.incident_id}`, 'muted'));
+    const details = node('details'); details.append(node('summary', 'Voir constats et hypothèses'));
+    const grid = node('div', undefined, 'detail-grid');
+    addList(grid, `Constats (${item.findings?.length || 0})`, item.findings, finding => `${finding.severity} · ${finding.finding_code} · ${finding.agent_id}`);
+    addList(grid, `Hypothèses (${item.hypotheses?.length || 0})`, item.hypotheses, hypothesis => `${hypothesis.hypothesis_id} · confiance ${hypothesis.confidence}`);
+    details.append(grid);
+    details.append(node('p', item.final_status ? `Statut final : ${item.final_status}` : 'Statut final : non vérifié', 'muted'));
+    card.append(details); return card;
+  }
+  async function load() {
+    message.textContent = 'Chargement…'; list.replaceChildren();
+    const params = new URLSearchParams({limit: String(pageSize), offset: String(offset)});
+    for (const id of ['q', 'priority', 'category']) { const value = document.getElementById(id).value.trim(); if (value) params.set(id === 'q' ? 'q' : id, value); }
+    try {
+      const response = await fetch(`/api/v1/incidents/history?${params}`);
+      if (!response.ok) throw new Error(`Erreur API (${response.status})`);
+      const data = await response.json();
+      document.querySelector('#total').textContent = data.total;
+      data.items.forEach(item => list.append(renderIncident(item)));
+      message.textContent = data.total ? '' : 'Aucun diagnostic enregistré pour ces filtres.';
+      const current = data.total ? Math.floor(offset / pageSize) + 1 : 0;
+      const pages = Math.ceil(data.total / pageSize);
+      document.querySelector('#page').textContent = `${current} / ${pages}`;
+      document.querySelector('#previous').disabled = offset === 0;
+      document.querySelector('#next').disabled = offset + pageSize >= data.total;
+    } catch (error) { message.textContent = `${error.message}. Vérifiez que l’API est démarrée.`; }
+  }
+  document.querySelector('#filters').addEventListener('submit', event => { event.preventDefault(); offset = 0; load(); });
+  document.querySelector('#previous').addEventListener('click', () => { offset = Math.max(0, offset - pageSize); load(); });
+  document.querySelector('#next').addEventListener('click', () => { offset += pageSize; load(); });
+  load();
+</script>
+</body>
+</html>

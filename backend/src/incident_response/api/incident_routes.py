@@ -4,6 +4,8 @@ from threading import Lock
 from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException, Query
+from pydantic import ValidationError
+from pydantic_settings.exceptions import SettingsError
 
 from incident_response.memory.repository import IncidentMemoryRepository
 from incident_response.memory.schemas import IncidentHistoryResponse
@@ -62,15 +64,41 @@ def decide_incident_remediation_plan(
     request: RemediationDecision,
     approval_token: str | None = Header(default=None, alias="X-Approval-Token"),
 ) -> ProposedRemediationPlan:
-    settings = RemediationApprovalSettings()
-    expected_token = settings.token.get_secret_value()
-    if len(expected_token) < 32 or not settings.reviewer_id:
+    try:
+        settings = RemediationApprovalSettings()
+    except (SettingsError, ValidationError) as exc:
         raise HTTPException(
             status_code=503,
-            detail="Human decision recording is disabled until approval credentials are configured.",
+            detail="Human decision recording is disabled because reviewer credentials are invalid.",
+        ) from exc
+
+    reviewers = getattr(settings, "reviewers", [])
+    authenticated_reviewer: str | None = None
+    if reviewers:
+        if approval_token is not None:
+            for reviewer in reviewers:
+                matches = hmac.compare_digest(
+                    approval_token,
+                    reviewer.token.get_secret_value(),
+                )
+                if matches:
+                    authenticated_reviewer = reviewer.reviewer_id
+    else:
+        expected_token = settings.token.get_secret_value()
+        if len(expected_token) >= 32 and settings.reviewer_id:
+            if approval_token is not None and hmac.compare_digest(approval_token, expected_token):
+                authenticated_reviewer = settings.reviewer_id
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail="Human decision recording is disabled until reviewer credentials are configured.",
+            )
+
+    if authenticated_reviewer is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid reviewer credentials.",
         )
-    if approval_token is None or not hmac.compare_digest(approval_token, expected_token):
-        raise HTTPException(status_code=401, detail="Invalid approval credentials.")
 
     repository = get_workflow().memory_repository
     if repository is None:
@@ -80,7 +108,7 @@ def decide_incident_remediation_plan(
         plan = repository.record_remediation_decision(
             str(incident_id),
             decision=decision,
-            reviewer_id=settings.reviewer_id,
+            reviewer_id=authenticated_reviewer,
             note=request.note,
             decided_at=datetime.now(UTC),
         )

@@ -41,7 +41,12 @@
     .plan-action { border:1px solid var(--line); border-radius:10px; padding:12px; margin:10px 0; background:#142129; }
     .plan-action h4 { margin:0 0 7px; }
     .risk { color:#ffbf69; font-weight:700; }
+    .approval-bar { display:grid; grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto; gap:10px; align-items:end; padding:14px; background:var(--panel); border:1px solid var(--line); border-radius:16px; margin-bottom:16px; }
+    .approval-bar label { display:grid; gap:5px; color:var(--muted); font-size:13px; }
+    .decision-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .decision-actions .reject { background:#ffbf69; border-color:#ffbf69; }
     @media(max-width:720px) { header { align-items:flex-start; flex-direction:column; } .filters { grid-template-columns:1fr 1fr; } .filters input { grid-column:1/-1; } .detail-grid { grid-template-columns:1fr; } }
+    @media(max-width:720px) { .approval-bar { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
@@ -56,6 +61,15 @@
     <select id="category" aria-label="Filtrer par catégorie"><option value="">Toutes catégories</option><option value="logs">Logs</option><option value="system">Système</option><option value="network">Réseau</option><option value="security">Sécurité</option><option value="general">Général</option></select>
     <button type="submit">Filtrer</button>
   </form>
+  <section class="approval-bar" aria-label="Validation des plans">
+    <label for="approval-token">Secret de validation
+      <input id="approval-token" type="password" autocomplete="off" placeholder="Secret configuré côté serveur">
+    </label>
+    <label for="approval-note">Note facultative pour la décision
+      <input id="approval-note" type="text" maxlength="1000" placeholder="Motif ou commentaire">
+    </label>
+    <span class="muted">Utilisé uniquement en mémoire de cette page; jamais enregistré dans le navigateur.</span>
+  </section>
   <div id="message" role="status"></div>
   <section class="list" id="list" aria-live="polite"></section>
   <nav class="pager" aria-label="Pagination"><button id="previous">Précédent</button><span class="muted" id="page"></span><button id="next">Suivant</button></nav>
@@ -72,7 +86,7 @@
     if (!values?.length) { parent.append(node('p', 'Aucun élément enregistré.', 'muted')); return; }
     const ul = node('ul'); values.forEach(value => { const li = node('li'); li.append(render(value)); ul.append(li); }); parent.append(ul);
   }
-  function renderPlan(parent, plan) {
+  function renderPlan(parent, plan, incidentId) {
     const section = node('section', undefined, 'plan');
     section.append(node('h3', 'Plan de remédiation proposé'));
     if (!plan) {
@@ -83,6 +97,17 @@
     if (plan.approval_decided_at) {
       section.append(node('p', `Décision enregistrée le ${new Date(plan.approval_decided_at).toLocaleString('fr-FR')} par ${plan.approval_decided_by || 'réviseur configuré'}.`, 'muted'));
       if (plan.approval_note) section.append(node('p', `Note du réviseur : ${plan.approval_note}`, 'muted'));
+    }
+    if (plan.approval_status === 'pending_approval' && (plan.actions || []).length) {
+      const controls = node('div', undefined, 'decision-actions');
+      const approve = node('button', 'Approuver le plan');
+      const reject = node('button', 'Refuser le plan', 'reject');
+      for (const [button, decision] of [[approve, 'approve'], [reject, 'reject']]) {
+        button.type = 'button';
+        button.addEventListener('click', () => submitDecision(incidentId, decision, controls));
+      }
+      controls.append(approve, reject);
+      section.append(controls);
     }
     section.append(node('p', plan.summary));
     (plan.actions || []).forEach(action => {
@@ -118,9 +143,31 @@
     addList(grid, `Constats (${item.findings?.length || 0})`, item.findings, finding => `${finding.severity} · ${finding.finding_code} · ${finding.agent_id}`);
     addList(grid, `Hypothèses (${item.hypotheses?.length || 0})`, item.hypotheses, hypothesis => `${hypothesis.hypothesis_id} · confiance ${hypothesis.confidence}`);
     details.append(grid);
-    renderPlan(details, item.proposed_remediation);
+    renderPlan(details, item.proposed_remediation, item.incident_id);
     details.append(node('p', item.final_status ? `Statut final : ${item.final_status}` : 'Statut final : non vérifié', 'muted'));
     card.append(details); return card;
+  }
+  async function submitDecision(incidentId, decision, controls) {
+    const token = document.querySelector('#approval-token').value;
+    if (!token) { message.textContent = 'Saisissez le secret de validation pour enregistrer une décision.'; return; }
+    controls.querySelectorAll('button').forEach(button => { button.disabled = true; });
+    message.textContent = 'Enregistrement de la décision…';
+    try {
+      const response = await fetch(`/api/v1/incidents/${encodeURIComponent(incidentId)}/remediation-plan/decision`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-Approval-Token': token},
+        body: JSON.stringify({decision, note: document.querySelector('#approval-note').value.trim() || null})
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || `Erreur API (${response.status})`);
+      document.querySelector('#approval-token').value = '';
+      document.querySelector('#approval-note').value = '';
+      message.textContent = `Décision « ${result.approval_status} » enregistrée. Aucune action n’a été exécutée.`;
+      await load();
+    } catch (error) {
+      message.textContent = `${error.message}. Le plan n’a pas été modifié.`;
+      controls.querySelectorAll('button').forEach(button => { button.disabled = false; });
+    }
   }
   async function load() {
     message.textContent = 'Chargement…'; list.replaceChildren();

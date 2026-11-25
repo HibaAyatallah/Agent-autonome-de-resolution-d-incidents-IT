@@ -1,3 +1,4 @@
+import json
 import unittest
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -167,12 +168,58 @@ class RemediationApiTests(unittest.TestCase):
         with patch("incident_response.api.incident_routes.RemediationApprovalSettings") as settings:
             settings.return_value.token.get_secret_value.return_value = ""
             settings.return_value.reviewer_id = ""
+            settings.return_value.reviewers = []
             with self.assertRaises(HTTPException) as caught:
                 decide_incident_remediation_plan(
                     "00000000-0000-0000-0000-000000000001",
                     RemediationDecision(decision="approve"),
                 )
         self.assertEqual(caught.exception.status_code, 503)
+
+    def test_individual_reviewer_token_sets_server_identity(self) -> None:
+        token_a = "reviewer-a-token-with-at-least-32-characters"
+        token_b = "reviewer-b-token-with-at-least-32-characters"
+        reviewers = [
+            {"reviewer_id": "reviewer-a", "token": token_a},
+            {"reviewer_id": "reviewer-b", "token": token_b},
+        ]
+        with TemporaryDirectory() as directory, self.repository(directory) as repository:
+            workflow = IncidentWorkflow(memory_repository=repository)
+            incident = IncidentInput(
+                origin=IncidentOrigin.MONITORING,
+                description="CPU usage alert",
+                monitoring_snapshot=simulate_snapshot(
+                    SystemMetrics(
+                        hostname="test-host",
+                        cpu_percent=97,
+                        ram_percent=40,
+                        ram_available_bytes=1000,
+                        disk_percent=50,
+                        disk_free_bytes=2000,
+                    )
+                ),
+            )
+            with patch("incident_response.api.incident_routes.get_workflow", return_value=workflow):
+                diagnose_incident(incident)
+                with patch.dict(
+                    "os.environ",
+                    {"REMEDIATION_REVIEWERS": json.dumps(reviewers)},
+                ):
+                    with self.assertRaises(HTTPException) as invalid:
+                        decide_incident_remediation_plan(
+                            incident.incident_id,
+                            RemediationDecision(decision="approve"),
+                            approval_token="unknown-reviewer-token",
+                        )
+                    self.assertEqual(invalid.exception.status_code, 401)
+                    decision = decide_incident_remediation_plan(
+                        incident.incident_id,
+                        RemediationDecision(decision="approve"),
+                        approval_token=token_b,
+                    )
+
+            self.assertEqual(decision.approval_decided_by, "reviewer-b")
+            self.assertEqual(decision.execution_status, ExecutionStatus.NOT_EXECUTED)
 
     def test_dashboard_renders_plan_fields_using_text_nodes(self) -> None:
         from pathlib import Path
@@ -187,6 +234,10 @@ class RemediationApiTests(unittest.TestCase):
         self.assertIn("action.approval_required", source)
         self.assertIn("plan.execution_status", source)
         self.assertIn("el.textContent = text", source)
+        self.assertIn("X-Approval-Token", source)
+        self.assertIn("submitDecision(incidentId, decision, controls)", source)
+        self.assertNotIn("localStorage", source)
+        self.assertNotIn("sessionStorage", source)
 
 
 if __name__ == "__main__":

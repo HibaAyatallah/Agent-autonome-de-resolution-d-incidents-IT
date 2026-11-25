@@ -80,6 +80,10 @@
       parent.append(section); return;
     }
     section.append(node('p', `État : ${plan.status} · Approbation : ${plan.approval_status} · Exécution : ${plan.execution_status}`, 'muted'));
+    if (plan.approval_decided_at) {
+      section.append(node('p', `Décision enregistrée le ${new Date(plan.approval_decided_at).toLocaleString('fr-FR')} par ${plan.approval_decided_by || 'réviseur configuré'}.`, 'muted'));
+      if (plan.approval_note) section.append(node('p', `Note du réviseur : ${plan.approval_note}`, 'muted'));
+    }
     section.append(node('p', plan.summary));
     (plan.actions || []).forEach(action => {
       const card = node('div', undefined, 'plan-action');
@@ -89,7 +93,7 @@
       card.append(node('p', `Lien avec les preuves : ${action.rationale}`));
       card.append(node('p', `Paramètres autorisés : ${JSON.stringify(action.parameters)}`));
       card.append(node('p', `Risque ${action.risk_level} · ${action.risk_explanation}`, 'risk'));
-      card.append(node('p', action.approval_required ? 'Validation humaine requise. Aucune action exécutée.' : 'Validation non requise.'));
+      card.append(node('p', action.approval_required ? `Validation humaine : ${plan.approval_status}. Aucune action exécutée.` : 'Validation non requise.'));
       addList(card, 'Preuves associées', action.evidence, item => `${item.agent_id} · ${item.finding_code} · ${item.source}.${item.field} = ${item.value ?? 'non disponible'}${item.unit ? ` ${item.unit}` : ''}`);
       addList(card, 'Limites', action.limitations, value => value);
       section.append(card);

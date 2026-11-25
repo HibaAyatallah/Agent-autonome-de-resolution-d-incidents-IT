@@ -2,7 +2,9 @@ import unittest
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from incident_response.api.incident_routes import (
+    decide_incident_remediation_plan,
     diagnose_incident,
     get_incident_remediation_plan,
     list_incident_history,
@@ -14,7 +16,9 @@ from incident_response.monitoring.simulation import simulate_snapshot
 from incident_response.orchestration.models import IncidentInput, IncidentOrigin
 from incident_response.orchestration.workflow import IncidentWorkflow
 from incident_response.remediation.models import (
+    ApprovalStatus,
     ExecutionStatus,
+    RemediationDecision,
     RemediationPlanStatus,
 )
 
@@ -100,6 +104,75 @@ class RemediationApiTests(unittest.TestCase):
                 assessment.remediation_plan.execution_status, ExecutionStatus.NOT_EXECUTED
             )
             self.assertEqual(stored_plan.actions, [])
+
+    def test_approval_is_authenticated_persisted_and_never_executes(self) -> None:
+        with TemporaryDirectory() as directory, self.repository(directory) as repository:
+            workflow = IncidentWorkflow(memory_repository=repository)
+            incident = IncidentInput(
+                origin=IncidentOrigin.MONITORING,
+                description="CPU usage alert",
+                monitoring_snapshot=simulate_snapshot(
+                    SystemMetrics(
+                        hostname="test-host",
+                        cpu_percent=97,
+                        ram_percent=40,
+                        ram_available_bytes=1000,
+                        disk_percent=50,
+                        disk_free_bytes=2000,
+                    )
+                ),
+            )
+            with patch("incident_response.api.incident_routes.get_workflow", return_value=workflow):
+                assessment = diagnose_incident(incident)
+                with patch.dict(
+                    "os.environ",
+                    {
+                        "REMEDIATION_APPROVAL_TOKEN": "private-test-token-that-is-at-least-32",
+                        "REMEDIATION_APPROVER_ID": "on-call-reviewer",
+                    },
+                ):
+                    decided = decide_incident_remediation_plan(
+                        incident.incident_id,
+                        RemediationDecision(decision="approve", note="Reviewed evidence"),
+                        approval_token="private-test-token-that-is-at-least-32",
+                    )
+                loaded = get_incident_remediation_plan(incident.incident_id)
+
+                self.assertEqual(decided.approval_status, ApprovalStatus.APPROVED)
+                self.assertEqual(decided.approval_decided_by, "on-call-reviewer")
+                self.assertIsNotNone(decided.approval_decided_at)
+                self.assertEqual(decided.execution_status, ExecutionStatus.NOT_EXECUTED)
+                self.assertEqual(loaded.approval_status, ApprovalStatus.APPROVED)
+                self.assertEqual(
+                    assessment.remediation_plan.execution_status, ExecutionStatus.NOT_EXECUTED
+                )
+                with (
+                    patch.dict(
+                        "os.environ",
+                        {
+                            "REMEDIATION_APPROVAL_TOKEN": "private-test-token-that-is-at-least-32",
+                            "REMEDIATION_APPROVER_ID": "on-call-reviewer",
+                        },
+                    ),
+                    self.assertRaises(HTTPException) as caught,
+                ):
+                    decide_incident_remediation_plan(
+                        incident.incident_id,
+                        RemediationDecision(decision="reject"),
+                        approval_token="private-test-token-that-is-at-least-32",
+                    )
+                self.assertEqual(caught.exception.status_code, 409)
+
+    def test_decision_endpoint_is_disabled_without_credentials(self) -> None:
+        with patch("incident_response.api.incident_routes.RemediationApprovalSettings") as settings:
+            settings.return_value.token.get_secret_value.return_value = ""
+            settings.return_value.reviewer_id = ""
+            with self.assertRaises(HTTPException) as caught:
+                decide_incident_remediation_plan(
+                    "00000000-0000-0000-0000-000000000001",
+                    RemediationDecision(decision="approve"),
+                )
+        self.assertEqual(caught.exception.status_code, 503)
 
     def test_dashboard_renders_plan_fields_using_text_nodes(self) -> None:
         from pathlib import Path

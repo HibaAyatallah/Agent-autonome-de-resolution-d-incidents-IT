@@ -14,7 +14,7 @@ from incident_response.memory.schemas import IncidentHistoryItem, IncidentHistor
 from incident_response.memory.settings import MemorySettings
 from incident_response.orchestration.models import IncidentAssessment, IncidentInput
 from incident_response.reasoning.models import SimilarIncidentReference
-from incident_response.remediation.models import ProposedRemediationPlan
+from incident_response.remediation.models import ApprovalStatus, ProposedRemediationPlan
 
 _IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.])")
 _EMAIL = re.compile(r"(?i)\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b")
@@ -24,8 +24,26 @@ _SECRET_ASSIGNMENT = re.compile(
 )
 _TOKEN = re.compile(r"[^\W_]{3,}", flags=re.UNICODE)
 _STOP_WORDS = {
-    "avec", "dans", "des", "les", "une", "pour", "sur", "the", "and", "for", "from",
-    "with", "this", "that", "server", "serveur", "incident", "alerte", "alert", "general",
+    "avec",
+    "dans",
+    "des",
+    "les",
+    "une",
+    "pour",
+    "sur",
+    "the",
+    "and",
+    "for",
+    "from",
+    "with",
+    "this",
+    "that",
+    "server",
+    "serveur",
+    "incident",
+    "alerte",
+    "alert",
+    "general",
 }
 _SAFE_EVIDENCE_FIELDS = {
     "alert_name",
@@ -114,7 +132,11 @@ class IncidentMemoryRepository:
             for record in incident.alert_records
             if record.get("alert_name")
         )
-        pieces.extend(finding.code for report in assessment.agent_reports.values() for finding in report.findings)
+        pieces.extend(
+            finding.code
+            for report in assessment.agent_reports.values()
+            for finding in report.findings
+        )
         pieces.extend(hypothesis.hypothesis_id for hypothesis in assessment.reasoning.hypotheses)
         return " ".join(pieces)
 
@@ -280,6 +302,39 @@ class IncidentMemoryRepository:
                 return None
             return ProposedRemediationPlan.model_validate(record.proposed_remediation)
 
+    def record_remediation_decision(
+        self,
+        incident_id: str,
+        *,
+        decision: ApprovalStatus,
+        reviewer_id: str,
+        note: str | None,
+        decided_at: datetime,
+    ) -> ProposedRemediationPlan | None:
+        """Persist an approval decision; this method never executes an action."""
+        if decision not in {ApprovalStatus.APPROVED, ApprovalStatus.REJECTED}:
+            raise ValueError("Only approve or reject decisions can be recorded.")
+        with self._session_factory() as session:
+            record = session.get(IncidentMemoryRecord, incident_id)
+            if record is None or record.proposed_remediation is None:
+                return None
+            plan = ProposedRemediationPlan.model_validate(record.proposed_remediation)
+            if not plan.actions:
+                raise ValueError("A plan without proposed actions cannot be approved or rejected.")
+            if plan.approval_status != ApprovalStatus.PENDING_APPROVAL:
+                raise ValueError("This plan already has a decision.")
+            values = plan.model_dump(mode="json")
+            values.update(
+                approval_status=decision.value,
+                approval_decided_at=decided_at.isoformat(),
+                approval_decided_by=reviewer_id,
+                approval_note=sanitize_memory_text(note) if note else None,
+            )
+            updated = ProposedRemediationPlan.model_validate(values)
+            record.proposed_remediation = updated.model_dump(mode="json")
+            session.commit()
+            return updated
+
     def find_similar(
         self,
         incident: IncidentInput,
@@ -289,9 +344,7 @@ class IncidentMemoryRepository:
     ) -> list[SimilarIncidentReference]:
         if limit is not None and not 1 <= limit <= 25:
             raise ValueError("limit must be between 1 and 25.")
-        threshold = (
-            self.similar_case_minimum_score if minimum_score is None else minimum_score
-        )
+        threshold = self.similar_case_minimum_score if minimum_score is None else minimum_score
         if not 0 <= threshold <= 1:
             raise ValueError("minimum_score must be between 0 and 1.")
 

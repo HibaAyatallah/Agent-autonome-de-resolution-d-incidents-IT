@@ -1,13 +1,20 @@
+import hmac
+from datetime import UTC, datetime
 from threading import Lock
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 
 from incident_response.memory.repository import IncidentMemoryRepository
 from incident_response.memory.schemas import IncidentHistoryResponse
 from incident_response.orchestration.models import IncidentAssessment, IncidentInput
 from incident_response.orchestration.workflow import IncidentWorkflow
-from incident_response.remediation.models import ProposedRemediationPlan
+from incident_response.remediation.models import (
+    ApprovalStatus,
+    ProposedRemediationPlan,
+    RemediationDecision,
+)
+from incident_response.remediation.settings import RemediationApprovalSettings
 
 router = APIRouter()
 workflow: IncidentWorkflow | None = None
@@ -39,7 +46,50 @@ def get_incident_remediation_plan(incident_id: UUID) -> ProposedRemediationPlan:
         raise HTTPException(status_code=503, detail="Incident memory is not configured.")
     plan = repository.get_remediation_plan(str(incident_id))
     if plan is None:
-        raise HTTPException(status_code=404, detail="No remediation plan is stored for this incident.")
+        raise HTTPException(
+            status_code=404, detail="No remediation plan is stored for this incident."
+        )
+    return plan
+
+
+@router.post(
+    "/{incident_id}/remediation-plan/decision",
+    response_model=ProposedRemediationPlan,
+    tags=["incidents"],
+)
+def decide_incident_remediation_plan(
+    incident_id: UUID,
+    request: RemediationDecision,
+    approval_token: str | None = Header(default=None, alias="X-Approval-Token"),
+) -> ProposedRemediationPlan:
+    settings = RemediationApprovalSettings()
+    expected_token = settings.token.get_secret_value()
+    if len(expected_token) < 32 or not settings.reviewer_id:
+        raise HTTPException(
+            status_code=503,
+            detail="Human decision recording is disabled until approval credentials are configured.",
+        )
+    if approval_token is None or not hmac.compare_digest(approval_token, expected_token):
+        raise HTTPException(status_code=401, detail="Invalid approval credentials.")
+
+    repository = get_workflow().memory_repository
+    if repository is None:
+        raise HTTPException(status_code=503, detail="Incident memory is not configured.")
+    decision = ApprovalStatus.APPROVED if request.decision == "approve" else ApprovalStatus.REJECTED
+    try:
+        plan = repository.record_remediation_decision(
+            str(incident_id),
+            decision=decision,
+            reviewer_id=settings.reviewer_id,
+            note=request.note,
+            decided_at=datetime.now(UTC),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if plan is None:
+        raise HTTPException(
+            status_code=404, detail="No remediation plan is stored for this incident."
+        )
     return plan
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
@@ -17,6 +18,8 @@ class RemediationPlanStatus(StrEnum):
 class ApprovalStatus(StrEnum):
     PENDING_APPROVAL = "pending_approval"
     NOT_REQUIRED = "not_required"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class ExecutionStatus(StrEnum):
@@ -125,6 +128,9 @@ class ProposedRemediationPlan(BaseModel):
     summary: str
     approval_status: ApprovalStatus
     approval_required: bool
+    approval_decided_at: datetime | None = None
+    approval_decided_by: str | None = None
+    approval_note: str | None = None
     execution_status: Literal[ExecutionStatus.NOT_EXECUTED] = ExecutionStatus.NOT_EXECUTED
     actions: list[ProposedRemediationAction] = Field(default_factory=list)
     blocked_recommendations: list[BlockedRecommendation] = Field(default_factory=list)
@@ -138,13 +144,29 @@ class ProposedRemediationPlan(BaseModel):
             if has_actions
             else RemediationPlanStatus.INSUFFICIENT_EVIDENCE
         )
-        expected_approval = (
-            ApprovalStatus.PENDING_APPROVAL if has_actions else ApprovalStatus.NOT_REQUIRED
+        valid_approvals = (
+            {ApprovalStatus.PENDING_APPROVAL, ApprovalStatus.APPROVED, ApprovalStatus.REJECTED}
+            if has_actions
+            else {ApprovalStatus.NOT_REQUIRED}
         )
-        if self.status != expected_status or self.approval_status != expected_approval:
+        if self.status != expected_status or self.approval_status not in valid_approvals:
             raise ValueError(
                 "Plan and approval states must match the presence of proposed actions."
             )
         if self.approval_required != has_actions:
             raise ValueError("Approval is required exactly when the plan contains actions.")
+        has_decision = self.approval_status in {ApprovalStatus.APPROVED, ApprovalStatus.REJECTED}
+        if has_decision != bool(self.approval_decided_at and self.approval_decided_by):
+            raise ValueError("A recorded decision requires its timestamp and reviewer.")
+        if not has_decision and (
+            self.approval_decided_at or self.approval_decided_by or self.approval_note
+        ):
+            raise ValueError("Decision metadata is only valid after approval or rejection.")
         return self
+
+
+class RemediationDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    decision: Literal["approve", "reject"]
+    note: str | None = Field(default=None, max_length=1000)
